@@ -14,6 +14,9 @@ class BossmanApp extends StatelessWidget {
       title: 'BossmanConnect',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.blueGrey, useMaterial3: true),
+      darkTheme: ThemeData(
+          colorSchemeSeed: Colors.blueGrey, brightness: Brightness.dark, useMaterial3: true),
+      themeMode: ThemeMode.dark, // mörkt läge som standard (Niklas önskemål)
       home: const HomePage(),
     );
   }
