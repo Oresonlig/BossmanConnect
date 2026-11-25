@@ -1,0 +1,26 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+build/
+*.iml
+android/.gradle/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+*.p12
+SECRETS.txt
+.signing/
+node_modules/
+capture/
+_ref/
+site/
+Pics/
+HEMSIDAN_FOR_ANDRA_PROJEKT.md
+# Gammalt rent Android-projekt (ersatt av Flutter) — radera mapparna/filerna
+/app/
+/gradle/
+/build.gradle.kts
+/settings.gradle.kts
+/gradle.properties

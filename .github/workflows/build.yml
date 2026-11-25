@@ -1,0 +1,104 @@
+name: Build BossmanConnect
+
+# Varje push till main bygger APK:n och publicerar den som release `app-latest`
+# (samma upplägg som TheChain-MK2). Hemsidan länkar till:
+#   https://github.com/Oresonlig/BossmanConnect/releases/download/app-latest/bossmanconnect.apk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6   # samma som MK2
+          cache: true
+
+      # Genererar det som saknas i android/ — våra egna filer där skrivs inte över.
+      - name: Generate Android platform
+        run: flutter create --platforms android --org se.bossman --project-name bossman_connect .
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Flutter kan inte köras lokalt här → analyze + test i CI är kompilatorkontrollen.
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Extractor self-test
+        run: node tools/selftest.js
+
+      - name: Decode signing key
+        id: signing
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "path=$RUNNER_TEMP/release.keystore" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No signing secrets — debug-signed (a new build cannot install over the previous one)."
+          fi
+
+      - name: Configure signing
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
+        run: node tool/configure_android.mjs
+
+      # Byggnumret = körningsnumret → ökar alltid, så nya byggen installeras ovanpå gamla.
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >
+          flutter build apk --release
+          --target-platform android-arm64
+          --build-name 1.0.${{ github.run_number }}
+          --build-number ${{ github.run_number }}
+          --dart-define=BUILD=${{ github.run_number }}
+
+      - name: Publish app-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk bossmanconnect.apk
+          # version.json = appens självuppdatering (lib/updater.dart).
+          SHA=$(sha256sum bossmanconnect.apk | cut -d' ' -f1)
+          echo "{\"build\": ${{ github.run_number }}, \"sha256\": \"$SHA\", \"apk\": \"bossmanconnect.apk\"}" > version.json
+          cat version.json
+          NOTES="BossmanConnect 1.0.${{ github.run_number }}, commit ${{ github.sha }}. Install: download bossmanconnect.apk, allow 'install unknown apps', open the file. Later updates: tap Update in the app."
+          # Byt ut filerna i releasen i stället för att radera den — en radering mitt
+          # under en nedladdning lämnade MK2 hängande på 99,9 %. APK först,
+          # version.json SIST: versionsfilen får aldrig peka på en APK som inte finns än.
+          if gh release view app-latest >/dev/null 2>&1; then
+            gh release upload app-latest bossmanconnect.apk --clobber
+            gh release upload app-latest version.json --clobber
+            git tag -f app-latest "${{ github.sha }}"
+            git push -f origin app-latest
+            gh release edit app-latest --title "BossmanConnect 1.0.${{ github.run_number }}" --notes "$NOTES"
+          else
+            gh release create app-latest bossmanconnect.apk version.json --latest --target "${{ github.sha }}" \
+              --title "BossmanConnect 1.0.${{ github.run_number }}" --notes "$NOTES"
+          fi

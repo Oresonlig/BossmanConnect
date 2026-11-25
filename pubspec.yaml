@@ -1,0 +1,22 @@
+name: bossman_connect
+description: "En knapp som kopplar ihop två Bose SoundLink Revolve+."
+publish_to: 'none'
+
+# Versionen sätts av CI (--build-name/--build-number), inte här.
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  ota_update: ^7.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

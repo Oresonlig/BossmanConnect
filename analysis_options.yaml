@@ -1,0 +1,7 @@
+# Egen fil så att `flutter create` i CI inte lägger in en som kräver
+# flutter_lints. Analyzerns standardregler räcker: CI:s analyze är vår
+# kompilatorkontroll (Flutter kan inte köras lokalt här).
+analyzer:
+  exclude:
+    - _ref/**
+    - build/**
