@@ -422,21 +422,47 @@ class _HomePageState extends State<HomePage> {
           gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [_bgTop, _bgBottom]),
         ),
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
-            children: [
+          child: LayoutBuilder(builder: (context, box) {
+            final cards = <Widget>[
               _header(),
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
               _speakerCard(),
               if (_conn?.bose ?? false) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 _partyCard(_conn!),
               ],
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _detailsCard(),
-              _updateRow(),
-            ],
-          ),
+            ];
+            const pad = EdgeInsets.fromLTRB(16, 10, 16, 6);
+            // Details öppen: vanlig scroll. Stängd: allt ryms på skärmen utan scroll (Niklas 2026-11-26) —
+            // FittedBox krymper vid behov i stället för att låta innehållet rinna över.
+            if (_showDetails) {
+              return ListView(padding: pad, children: [...cards, _updateRow()]);
+            }
+            return Padding(
+              padding: pad,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.topCenter,
+                      child: SizedBox(
+                        width: box.maxWidth - pad.horizontal,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: cards,
+                        ),
+                      ),
+                    ),
+                  ),
+                  _updateRow(),
+                ],
+              ),
+            );
+          }),
         ),
       ),
     );
@@ -447,8 +473,8 @@ class _HomePageState extends State<HomePage> {
     return Row(
       children: [
         Container(
-          width: 48,
-          height: 48,
+          width: 42,
+          height: 42,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: const LinearGradient(colors: [_partyA, _partyB]),
@@ -471,7 +497,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _panel({required String title, required Widget child, Widget? trailing}) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
       decoration: BoxDecoration(
         color: _card,
         borderRadius: BorderRadius.circular(22),
@@ -480,7 +506,9 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          SizedBox(
+            height: 36,
+            child: Row(
             children: [
               Text(title,
                   style: Theme.of(context)
@@ -491,7 +519,8 @@ class _HomePageState extends State<HomePage> {
               if (trailing != null) trailing,
             ],
           ),
-          const SizedBox(height: 10),
+          ),
+          const SizedBox(height: 6),
           child,
         ],
       ),
@@ -568,7 +597,7 @@ class _HomePageState extends State<HomePage> {
                       }
                     }),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           if (c != null && c.address == _selected)
             Row(
               children: [
@@ -686,12 +715,12 @@ class _HomePageState extends State<HomePage> {
             ],
             onChanged: _busy != null ? null : (v) => setState(() => _partner = v),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           _PartyButton(
             busy: partying,
             onPressed: _partner == null || _busy != null ? null : () => _partyAction('party'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 2),
           TextButton.icon(
             style: TextButton.styleFrom(foregroundColor: _muted),
             onPressed: _partner == null || _busy != null ? null : () => _partyAction('unlink'),
@@ -842,8 +871,8 @@ class _BatteryRing extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _batteryColor(level);
     return SizedBox(
-      width: 72,
-      height: 72,
+      width: 66,
+      height: 66,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -940,7 +969,7 @@ class _PartyButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             onTap: onPressed,
             child: SizedBox(
-              height: 76,
+              height: 64,
               child: Center(
                 child: busy
                     ? const Row(
