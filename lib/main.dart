@@ -39,11 +39,15 @@ class BossmanApp extends StatelessWidget {
 }
 
 class Speaker {
-  const Speaker(this.name, this.address, {this.battery = -1, this.connected = false});
+  const Speaker(this.name, this.address, {this.battery = -1, this.connected = false, this.audio});
   final String name;
   final String address;
   final int battery; // Androids nivå, -1 = okänd
   final bool connected;
+  final bool? audio; // telefonens ljud (A2DP) går hit; null = okänt
+
+  Speaker copyWith({int? battery, bool? audio}) =>
+      Speaker(name, address, battery: battery ?? this.battery, connected: connected, audio: audio ?? this.audio);
   bool get looksBose {
     final n = name.toLowerCase();
     return n.contains('bose') || n.contains('ninja') || n.contains('lantern') || n.contains('soundlink');
@@ -59,11 +63,19 @@ class Partner {
 
 /// Det CONNECT gav: en Bose-session (party möjligt) eller bara batteri (t.ex. Jabra).
 class Connection {
-  Connection({required this.address, required this.bose, this.firmware, this.battery = -1, this.partners = const []});
+  Connection({
+    required this.address,
+    required this.bose,
+    this.firmware,
+    this.battery = -1,
+    this.audio,
+    this.partners = const [],
+  });
   final String address;
   final bool bose;
   final String? firmware;
   int battery;
+  bool? audio; // telefonens ljud (A2DP) går till högtalaren; null = okänt
   List<Partner> partners;
 }
 
@@ -108,6 +120,8 @@ class _HomePageState extends State<HomePage> {
           _addLog(call.arguments as String);
         case 'battery':
           _onBattery(Map<String, Object?>.from(call.arguments as Map));
+        case 'audio':
+          _onAudio(Map<String, Object?>.from(call.arguments as Map));
         case 'disconnected':
           _onDisconnected();
       }
@@ -182,7 +196,9 @@ class _HomePageState extends State<HomePage> {
       final speakers = raw
           .map((e) => e as Map)
           .map((m) => Speaker(m['name'] as String, m['address'] as String,
-              battery: (m['battery'] as int?) ?? -1, connected: (m['connected'] as bool?) ?? false))
+              battery: (m['battery'] as int?) ?? -1,
+              connected: (m['connected'] as bool?) ?? false,
+              audio: m['audio'] as bool?))
           .toList()
         ..sort((a, b) {
           if (a.connected != b.connected) return a.connected ? -1 : 1;
@@ -217,13 +233,29 @@ class _HomePageState extends State<HomePage> {
     final level = (m['level'] as int?) ?? -1;
     if (address == null || !mounted) return;
     setState(() {
-      _speakers = [
-        for (final s in _speakers)
-          s.address == address ? Speaker(s.name, s.address, battery: level, connected: s.connected) : s,
-      ];
+      _speakers = [for (final s in _speakers) s.address == address ? s.copyWith(battery: level) : s];
       final c = _conn;
       if (c != null && !c.bose && c.address == address) c.battery = level;
     });
+  }
+
+  void _onAudio(Map<String, Object?> m) {
+    final address = m['address'] as String?;
+    final connected = m['connected'] as bool?;
+    if (address == null || connected == null || !mounted) return;
+    setState(() {
+      _speakers = [for (final s in _speakers) s.address == address ? s.copyWith(audio: connected) : s];
+      final c = _conn;
+      if (c != null && c.address == address) c.audio = connected;
+    });
+  }
+
+  Future<void> _openBluetooth() async {
+    try {
+      await _bose.invokeMethod('openBluetoothSettings');
+    } on PlatformException catch (e) {
+      _addLog(e.message ?? e.code);
+    }
   }
 
   void _onDisconnected() {
@@ -242,6 +274,7 @@ class _HomePageState extends State<HomePage> {
       bose: (raw['bose'] as bool?) ?? false,
       firmware: raw['firmware'] as String?,
       battery: (raw['battery'] as int?) ?? -1,
+      audio: raw['audio'] as bool?,
       partners: partners,
     );
   }
@@ -270,6 +303,7 @@ class _HomePageState extends State<HomePage> {
       final raw = await _bose.invokeMapMethod<String, Object?>('connect', {'address': address}) ?? {};
       final c = _parseConnection(address, raw);
       if (c.bose && c.battery < 0) c.battery = _selectedSpeaker?.battery ?? -1;
+      c.audio ??= _selectedSpeaker?.audio;
       setState(() {
         _conn = c;
         _pickPartner(c);
@@ -540,9 +574,17 @@ class _HomePageState extends State<HomePage> {
                         style: const TextStyle(color: _muted, fontSize: 13),
                       ),
                       const SizedBox(height: 6),
-                      _StatusPill(
-                        label: c.bose ? 'Connected' : (sp?.connected ?? false ? 'Connected to phone' : 'Not connected'),
-                        color: c.bose || (sp?.connected ?? false) ? _ok : _warn,
+                      // Två skilda anslutningar: appens kontrollkanal och telefonens ljud (A2DP).
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (c.bose) const _StatusPill(label: 'Control', color: _ok),
+                          _StatusPill(
+                            label: switch (c.audio) { true => 'Audio', false => 'No audio', null => 'Audio ?' },
+                            color: switch (c.audio) { true => _ok, false => _warn, null => _muted },
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -572,6 +614,26 @@ class _HomePageState extends State<HomePage> {
                     style: const TextStyle(fontWeight: FontWeight.w700, letterSpacing: 1.2)),
               ),
             ),
+          // Android låter inte appar slå på ljudanslutningen — genväg till inställningarna i stället.
+          if (c != null && c.address == _selected && c.audio != true) ...[
+            const SizedBox(height: 12),
+            const Text("Your phone's sound isn't going to this speaker yet. Connect it in Bluetooth settings.",
+                style: TextStyle(color: _muted, fontSize: 13)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _teal,
+                  side: BorderSide(color: _teal.withValues(alpha: 0.4)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _openBluetooth,
+                icon: const Icon(Icons.settings_bluetooth_rounded, size: 20),
+                label: const Text('OPEN BLUETOOTH', style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+              ),
+            ),
+          ],
         ],
       ),
     );

@@ -2,9 +2,11 @@ package se.bossman.bossman_connect
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -14,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -33,6 +36,10 @@ class MainActivity : FlutterActivity() {
     private var session: BoseSession? = null
     private var sessionAddress: String? = null
     private var batteryReceiver: BroadcastReceiver? = null
+    private var audioReceiver: BroadcastReceiver? = null
+
+    /** A2DP-proxyn: LÄSER om telefonens ljud går till en enhet (publikt API). Ansluta ljud kan en app inte. */
+    private var a2dp: BluetoothProfile? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +48,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         batteryReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        audioReceiver?.let { try { unregisterReceiver(it) } catch (_: Exception) {} }
+        a2dp?.let { p -> try { adapter()?.closeProfileProxy(BluetoothProfile.A2DP, p) } catch (_: Exception) {} }
         io.execute { session?.close(); session = null }
         io.shutdown()
         super.onDestroy()
@@ -65,6 +74,14 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestPermission" -> requestBtPermission(result)
+                "openBluetoothSettings" -> {
+                    try {
+                        startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("NO_SETTINGS", "Couldn't open Bluetooth settings.", null)
+                    }
+                }
                 "bondedDevices" -> bondedDevices(result)
                 "loadSettings" -> result.success(
                     mapOf(
@@ -103,6 +120,61 @@ class MainActivity : FlutterActivity() {
             }
         }
         listenForBattery()
+        listenForAudio()
+    }
+
+    // ---- Ljudanslutning (A2DP): bara läsning ----
+
+    @SuppressLint("MissingPermission")
+    private fun connectA2dpProxy() {
+        if (a2dp != null) return
+        try {
+            adapter()?.getProfileProxy(this, object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
+                    a2dp = proxy
+                    // Gränssnittet kan ha frågat innan proxyn var klar — skicka läget för anslutna enheter.
+                    for (d in proxy.connectedDevices) {
+                        channel.invokeMethod("audio", mapOf("address" to d.address, "connected" to true))
+                    }
+                }
+                override fun onServiceDisconnected(profile: Int) { a2dp = null }
+            }, BluetoothProfile.A2DP)
+        } catch (_: Exception) {
+            // Utan proxy visas ljudläget som okänt.
+        }
+    }
+
+    /** true/false, eller null om det inte går att avgöra (proxyn inte klar / saknar behörighet). */
+    @SuppressLint("MissingPermission")
+    private fun audioConnected(d: BluetoothDevice): Boolean? = try {
+        a2dp?.getConnectionState(d)?.let { it == BluetoothProfile.STATE_CONNECTED }
+    } catch (_: Exception) { null }
+
+    private fun listenForAudio() {
+        if (audioReceiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                @Suppress("DEPRECATION")
+                val d = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1)
+                if (state != BluetoothProfile.STATE_CONNECTED && state != BluetoothProfile.STATE_DISCONNECTED) return
+                channel.invokeMethod(
+                    "audio",
+                    mapOf("address" to d.address, "connected" to (state == BluetoothProfile.STATE_CONNECTED)),
+                )
+            }
+        }
+        try {
+            // Systemets broadcast — kräver ingen exported-flagga, men Android 13+ vill ha en uttrycklig.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(r, IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED), Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(r, IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED))
+            }
+            audioReceiver = r
+        } catch (_: Exception) {
+            // Ljudläget läses ändå vid CONNECT och uppdatering av listan.
+        }
     }
 
     private fun adapter(): BluetoothAdapter? =
@@ -172,6 +244,7 @@ class MainActivity : FlutterActivity() {
             result.error("BT_OFF", "Bluetooth is off – turn it on and tap refresh.", null)
             return
         }
+        connectA2dpProxy()
         // Läser bara telefonens lista över parkopplade enheter — ingen anslutning, ingen sökning.
         // Alias = namnet du själv gett enheten i telefonens Bluetooth-inställningar (Android 11+).
         result.success(adapter.bondedDevices.map {
@@ -181,6 +254,7 @@ class MainActivity : FlutterActivity() {
                 "address" to it.address,
                 "battery" to androidBattery(it),
                 "connected" to androidConnected(it),
+                "audio" to audioConnected(it),
             )
         })
     }
@@ -210,7 +284,7 @@ class MainActivity : FlutterActivity() {
                 sessionAddress = address
                 try { statusOf(s) } catch (e: Exception) { closeAfterError(e); null } ?: mapOf("bose" to false)
             }
-            mainHandler.post { result.success(status) }
+            mainHandler.post { result.success(status + ("audio" to audioConnected(device))) }
         }
     }
 
