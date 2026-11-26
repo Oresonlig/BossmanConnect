@@ -155,7 +155,8 @@ class _HomePageState extends State<HomePage> {
     final settings = await _bose.invokeMapMethod<String, String>('loadSettings') ?? {};
     _commands.text = settings['commands'] ?? '';
     _selected = settings['primary'];
-    setState(() => _showAdvanced = _commands.text.trim().isEmpty);
+    // Egna kommandon ersätter den inbyggda länkningen — visa fältet om det inte är tomt.
+    setState(() => _showAdvanced = _commands.text.trim().isNotEmpty);
 
     final granted = await _bose.invokeMethod<bool>('requestPermission') ?? false;
     if (!granted) {
@@ -198,8 +199,8 @@ class _HomePageState extends State<HomePage> {
       _addLog('Pick a speaker first.');
       return;
     }
-    if (_commands.text.trim().isEmpty) {
-      _addLog('No commands entered – only testing the connection (see README).');
+    if (_commands.text.trim().isNotEmpty) {
+      _addLog('Sending your own commands (Advanced) instead of the built-in party link.');
     }
     await _bose.invokeMethod('saveSettings', {'primary': address, 'commands': _commands.text});
 
@@ -284,7 +285,7 @@ class _HomePageState extends State<HomePage> {
                 child: TextButton.icon(
                   onPressed: () => setState(() => _showAdvanced = !_showAdvanced),
                   icon: Icon(_showAdvanced ? Icons.expand_more : Icons.chevron_right),
-                  label: const Text('Advanced: commands (hex)'),
+                  label: const Text('Advanced: own commands (hex, replaces the built-in link)'),
                 ),
               ),
               if (_showAdvanced)
