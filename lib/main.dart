@@ -51,14 +51,15 @@ class _HomePageState extends State<HomePage> {
   bool _busy = false;
   bool _showAdvanced = false;
 
-  // Självuppdatering (lib/updater.dart).
+  // Självuppdatering (lib/updater.dart). Kollar BARA när man trycker CHECK FOR UPDATES,
+  // som MK2:s SYNC NOW (Niklas 2026-11-26) — inga automatiska nätanrop.
   final _updater = Updater();
-  late final AppLifecycleListener _lifecycle;
   UpdateInfo? _update;
   String? _updateStatus;
   bool _updateCheckFailed = false;
   bool _checkingUpdate = false;
   bool _installing = false;
+  DateTime? _updateCheckedAt;
 
   @override
   void initState() {
@@ -66,15 +67,11 @@ class _HomePageState extends State<HomePage> {
     _bose.setMethodCallHandler((call) async {
       if (call.method == 'log') _addLog(call.arguments as String);
     });
-    // Kolla vid start och varje gång appen kommer tillbaka i förgrunden — aldrig i bakgrunden.
-    _lifecycle = AppLifecycleListener(onResume: _checkUpdate);
     _init();
-    _checkUpdate();
   }
 
   @override
   void dispose() {
-    _lifecycle.dispose();
     _commands.dispose();
     _logScroll.dispose();
     super.dispose();
@@ -82,19 +79,20 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _checkUpdate() async {
     if (_checkingUpdate || _installing) return;
-    _checkingUpdate = true;
+    setState(() => _checkingUpdate = true);
     try {
       final info = await _updater.check();
       if (!mounted) return;
       setState(() {
         _update = info;
         _updateCheckFailed = false;
+        _updateCheckedAt = DateTime.now();
       });
     } on UpdateCheckFailed {
       // "Kunde inte kolla" visas som just det — aldrig som "du har senaste".
       if (mounted) setState(() => _updateCheckFailed = true);
     } finally {
-      _checkingUpdate = false;
+      if (mounted) setState(() => _checkingUpdate = false);
     }
   }
 
@@ -114,39 +112,47 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Widget _updateBanner() {
+  /// Liten rad längst ner, som MK2: status + CHECK FOR UPDATES, eller UPDATE när ett nyare bygge finns.
+  Widget _updateRow() {
+    final small = Theme.of(context).textTheme.bodySmall;
     final info = _update;
-    if (info == null) {
-      if (!_updateCheckFailed) return const SizedBox.shrink();
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text("Couldn't check for updates (no connection?).",
-            style: Theme.of(context).textTheme.bodySmall),
-      );
+    String two(int n) => n.toString().padLeft(2, '0');
+    final String line;
+    if (info != null) {
+      line = 'Build ${info.build} ready';
+    } else if (_checkingUpdate) {
+      line = 'Checking for updates…';
+    } else if (_updateCheckFailed) {
+      line = 'Could not check for updates';
+    } else if (_updateCheckedAt case final t?) {
+      line = 'Up to date · build $currentBuild · checked ${two(t.hour)}:${two(t.minute)}';
+    } else {
+      line = 'Build $currentBuild';
     }
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text('New version available (build ${info.build}, you have $currentBuild).')),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _installing ? null : _installUpdate,
-                  child: const Text('UPDATE'),
-                ),
+                Text(line, style: small),
+                if (info != null && _updateStatus != null) Text(_updateStatus!, style: small),
               ],
             ),
-            if (_updateStatus != null) ...[
-              const SizedBox(height: 8),
-              Text(_updateStatus!, style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ],
-        ),
+          ),
+          if (info != null)
+            FilledButton(
+              onPressed: _installing ? null : _installUpdate,
+              child: const Text('UPDATE'),
+            )
+          else
+            TextButton(
+              onPressed: _checkingUpdate ? null : _checkUpdate,
+              child: const Text('CHECK FOR UPDATES'),
+            ),
+        ],
       ),
     );
   }
@@ -248,7 +254,6 @@ class _HomePageState extends State<HomePage> {
               Text('BossmanConnect',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
-              _updateBanner(),
               const Text('Speaker your phone plays to (Ninja, the black one):'),
               Row(
                 children: [
@@ -321,6 +326,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
+              _updateRow(),
             ],
           ),
         ),
