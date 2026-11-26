@@ -739,8 +739,18 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text('Long-press the log to copy it.', style: TextStyle(color: _muted, fontSize: 12)),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('Long-press the log to copy it.', style: TextStyle(color: _muted, fontSize: 12)),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(foregroundColor: _muted),
+                      onPressed: _log.isEmpty ? null : () => setState(_log.clear),
+                      child: const Text('CLEAR'),
+                    ),
+                  ],
+                ),
                 if (_conn?.bose ?? false) ...[
                   const SizedBox(height: 12),
                   TextField(
