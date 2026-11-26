@@ -1,16 +1,15 @@
 # BossmanConnect
 
-En Flutter-app för Android med en enda knapp: **LINK SPEAKERS** (appens UI är på engelska). Den sätter två
-Bose SoundLink Revolve+ i Party- eller Stereo-läge.
+En Flutter-app för Android (UI på engelska): ansluter till en Bluetooth-högtalare, visar batteri och
+länkar två Bose SoundLink Revolve+ i party mode.
 
-Appen skickar exakt samma byte som Bose Connect, men utan allt runtomkring, och försöker
-automatiskt igen (3 gånger) om anslutningen fallerar.
+Appen skickar exakt samma byte som Bose Connect, men utan allt runtomkring.
 
 ## Struktur
 
 - `lib/main.dart`: gränssnittet (Flutter/Dart)
 - `android/app/src/main/kotlin/se/bossman/bossman_connect/MainActivity.kt`: brygga Flutter ↔ Bluetooth
-- `android/app/src/main/kotlin/se/bossman/bossman_connect/BoseLink.kt`: Bluetooth-anslutning, sändning, omförsök
+- `android/app/src/main/kotlin/se/bossman/bossman_connect/BoseLink.kt`: Boses protokoll och den öppna sessionen
 - `android/app/src/main/AndroidManifest.xml`: Bluetooth-behörigheter
 - `tools/extract.js`: plockar ut Bose Connects kommandon ur telefonens Bluetooth-logg
 
@@ -46,7 +45,11 @@ använde kanal 8). Ramar: `[block] [funktion] [operation] [längd] [payload]`, o
 | **Party link** | `04 01 05 0D 90 <Lantern> <telefon>` | `04 01 07 06 <Lantern>` |
 | Unlink | `04 02 05 06 <Lantern>` | `04 02 07 …` |
 
-LINK SPEAKERS gör sekvensen ovan själv. Fältet **Advanced** behövs bara för att prova andra kommandon
+| Batteri | `02 02 01 00` | `02 02 03 01 <procent>` |
+
+Appen: **CONNECT** öppnar kontrollkanalen och håller den öppen (att stänga för tidigt avbröt länken),
+visar batteri och högtalarens parade enheter. **PARTY** / **UNLINK** mot vald partner. Enheter utan
+Bose-kanal (t.ex. Jabra) visar bara Androids batterinivå. Under **Details** kan råa kommandon skickas
 (t.ex. Stereo-läge, som inte är fångat än). Fångas så här:
 
 ### Fånga fler kommandon
@@ -69,11 +72,11 @@ LINK SPEAKERS gör sekvensen ovan själv. Fältet **Advanced** behövs bara för
 > Samsung: snoop-loggen kommer bara med i bugreporten med `*#9900#` → Debug Level **MID**
 > (telefonen startar om). Sätt tillbaka LOW efteråt. `/sdcard/log` innehåller den inte.
 
-Egna kommandon i **Advanced** skickas rått, en rad per kommando (`01 02 03 04  # kommentar`),
-i stället för den inbyggda länkningen. Töm fältet för att gå tillbaka.
+Råa kommandon under **Details** skickas på den öppna sessionen, en rad per kommando
+(`01 02 03 04  # kommentar`).
 
 ## Tips
 
 - **Tvångsstoppa Bose Connect** innan du använder appen. Den kan hålla kontrollkanalen upptagen.
-- Appen letar upp den vita högtalaren via namnet **Lantern** i Ninjas lista över parade enheter.
+- Partnern väljs ur högtalarens egen lista över parade enheter (förval: länkad, annars "Lantern").
 - Loggen i appen kan kopieras (håll inne på den) om något strular.
