@@ -100,11 +100,17 @@ object BoseLink {
      * Länkar Ninja (som [device] pekar på) med Lantern i party mode, exakt som Bose Connect gör.
      * Körs på en bakgrundstråd.
      */
-    fun partyLink(device: BluetoothDevice, retries: Int = 3, log: (String) -> Unit): Boolean {
+    fun partyLink(
+        device: BluetoothDevice,
+        savedPhone: String?,
+        savePhone: (String) -> Unit,
+        retries: Int = 3,
+        log: (String) -> Unit,
+    ): Boolean {
         for (attempt in 1..retries) {
             try {
                 openVerified(device, log).use { (socket, reader) ->
-                    return linkOn(socket.outputStream, reader, log)
+                    return linkOn(socket.outputStream, reader, savedPhone, savePhone, log)
                 }
             } catch (e: Exception) {
                 log("Attempt $attempt/$retries failed: ${e.message}")
@@ -114,13 +120,29 @@ object BoseLink {
         return false
     }
 
-    private fun linkOn(out: OutputStream, reader: Reader, log: (String) -> Unit): Boolean {
+    private fun parseAddress(s: String?): ByteArray? {
+        val parts = s?.split(':') ?: return null
+        if (parts.size != 6) return null
+        return try { ByteArray(6) { parts[it].toInt(16).toByte() } } catch (_: NumberFormatException) { null }
+    }
+
+    private fun linkOn(
+        out: OutputStream,
+        reader: Reader,
+        savedPhone: String?,
+        savePhone: (String) -> Unit,
+        log: (String) -> Unit,
+    ): Boolean {
         // 1. Telefonens egen adress (Android lämnar inte ut den, men Ninja gör det).
+        //    Ninja svarar ERROR (05 01 04 01 06) en stund efter en länkning — då används den sparade.
         send(out, log, 0x05, 0x01, OP_GET, 0x00)
         val src = reader.await(3000) { isReply(it, 0x05, 0x01) }
-            ?: throw IOException("no answer to 'audio source'")
-        if (src.op != OP_STATUS || src.payload.size < 9) throw IOException("unexpected 'audio source' answer: $src")
-        val phone = src.payload.copyOfRange(3, 9)
+        val phone: ByteArray = if (src != null && src.op == OP_STATUS && src.payload.size >= 9) {
+            src.payload.copyOfRange(3, 9).also { savePhone(it.toAddress()) }
+        } else {
+            parseAddress(savedPhone)?.also { log("Ninja is busy – using the saved phone address") }
+                ?: throw IOException("Ninja is busy and no saved phone address yet: ${src ?: "no answer"}")
+        }
         log("Phone: ${phone.toAddress()}")
 
         // 2. Ninjas parade enheter, och namnet på var och en.
@@ -163,8 +185,21 @@ object BoseLink {
             log("Speaker refused the link command.")
             return false
         }
-        // Ninja rapporterar när Lantern faktiskt anslutit (04 01 06 … 01 i loggen, ~2 s senare). Logga det som kommer.
-        reader.await(4000) { false }
+        // Ninja rapporterar när Lantern faktiskt anslutit: 04 01 06 07 <Lantern> 01 (2–6 s efter
+        // RESULT i Bose Connects logg). Stängs kanalen innan dess avbryts länken ("connection lost",
+        // testat 2026-11-26) — så kanalen hålls öppen tills bekräftelsen kommer.
+        log("Waiting for Lantern to connect …")
+        val target = lantern
+        val connected = reader.await(25000) {
+            it.block == 0x04 && it.func == 0x01 && it.op == 0x06 && it.payload.size >= 7 &&
+                it.payload.copyOfRange(0, 6).contentEquals(target) && it.payload[6].toInt() == 0x01
+        }
+        if (connected == null) {
+            log("Lantern never confirmed the connection.")
+            return false
+        }
+        log("Lantern connected.")
+        reader.await(3000) { false } // som Bose Connect: släpp inte kanalen direkt
         return true
     }
 

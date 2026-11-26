@@ -129,7 +129,16 @@ class MainActivity : FlutterActivity() {
         Thread {
             val log: (String) -> Unit = { msg -> mainHandler.post { channel.invokeMethod("log", msg) } }
             // Tomt fält = den inbyggda party link-sekvensen; egna kommandon (Advanced) skickas rått.
-            val ok = if (commands.isEmpty()) BoseLink.partyLink(device, log = log) else BoseLink.run(device, commands, log = log)
+            val ok = if (commands.isEmpty()) {
+                BoseLink.partyLink(
+                    device,
+                    savedPhone = prefs.getString("phone", null),
+                    savePhone = { prefs.edit().putString("phone", it).apply() },
+                    log = log,
+                )
+            } else {
+                BoseLink.run(device, commands, log = log)
+            }
             mainHandler.post { result.success(ok) }
         }.start()
     }
