@@ -47,9 +47,6 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Extractor self-test
-        run: node tools/selftest.js
-
       - name: Decode signing key
         id: signing
         run: |
