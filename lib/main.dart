@@ -364,7 +364,19 @@ class _HomePageState extends State<HomePage> {
       final ok = await _bose.invokeMethod<bool>(method, {'partner': partner}) ?? false;
       final what = method == 'party' ? 'Party mode' : 'Unlink';
       _addLog(ok ? '$what ✔' : '$what failed ✘');
-      await _refreshStatus();
+      final c = _conn;
+      if (ok && c != null && mounted) {
+        // Markera direkt i stället för att fråga högtalaren: den är upptagen strax efter en
+        // länkning, och en statusfråga då fällde förr hela sessionen (fälttest 2026-11-26).
+        setState(() => c.partners = [
+              for (final p in c.partners)
+                p.address == partner ? Partner(p.name, p.address, method == 'party') : p,
+            ]);
+      }
+      // Hämta riktig status när högtalaren har lugnat sig.
+      Future.delayed(const Duration(seconds: 10), () {
+        if (mounted && _busy == null) _refreshStatus();
+      });
     } on PlatformException catch (e) {
       _addLog(e.message ?? e.code);
     } finally {

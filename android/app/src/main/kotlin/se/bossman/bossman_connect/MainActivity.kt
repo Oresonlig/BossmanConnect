@@ -282,7 +282,14 @@ class MainActivity : FlutterActivity() {
             } else {
                 session = s
                 sessionAddress = address
-                try { statusOf(s) } catch (e: Exception) { closeAfterError(e); null } ?: mapOf("bose" to false)
+                try {
+                    statusOf(s)
+                } catch (e: NoAnswer) {
+                    log(e.message ?: "no answer")
+                    mapOf("bose" to true, "firmware" to s.firmware, "battery" to -1, "partners" to emptyList<Any>())
+                } catch (e: Exception) {
+                    closeAfterError(e); null
+                } ?: mapOf("bose" to false)
             }
             mainHandler.post { result.success(status + ("audio" to audioConnected(device))) }
         }
@@ -299,6 +306,10 @@ class MainActivity : FlutterActivity() {
             try {
                 val value = work(s)
                 mainHandler.post { result.success(value) }
+            } catch (e: NoAnswer) {
+                // Upptagen högtalare ≠ bruten anslutning: sessionen (och party-länken) lever kvar.
+                log(e.message ?: "no answer")
+                mainHandler.post { result.error("NO_ANSWER", e.message, null) }
             } catch (e: Exception) {
                 closeAfterError(e)
                 mainHandler.post { result.error("LOST", "Lost the connection to the speaker.", null) }

@@ -61,6 +61,12 @@ object BoseProtocol {
             }
 }
 
+/**
+ * Högtalaren svarade inte i tid — anslutningen är INTE bruten. Får aldrig stänga sessionen:
+ * det kopplade bort party-partnern (fälttest 2026-11-26, Ninja svarade inte på 04 04 direkt efter länk).
+ */
+class NoAnswer(what: String) : Exception("no answer to '$what' (speaker busy?)")
+
 class Frame(val block: Int, val func: Int, val op: Int, val payload: ByteArray) {
     fun isReply(block: Int, func: Int) =
         this.block == block && this.func == func &&
@@ -155,9 +161,8 @@ class BoseSession internal constructor(
     /** Högtalarens parade enheter med namn och om de är anslutna just nu. */
     fun paired(): List<PairedDevice> {
         send(0x04, 0x04, BoseProtocol.OP_GET, 0x00)
-        val list = reader.await(3000) { it.isReply(0x04, 0x04) }
-            ?: throw IOException("no answer to 'paired devices'")
-        if (list.op != BoseProtocol.OP_STATUS || list.payload.isEmpty()) throw IOException("unexpected answer: $list")
+        val list = reader.await(3000) { it.isReply(0x04, 0x04) } ?: throw NoAnswer("paired devices")
+        if (list.op != BoseProtocol.OP_STATUS || list.payload.isEmpty()) throw NoAnswer("paired devices: $list")
         val mask = list.payload[0].toInt() and 0xFF
         val result = mutableListOf<PairedDevice>()
         var index = 0
