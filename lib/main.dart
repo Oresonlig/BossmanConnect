@@ -325,6 +325,8 @@ class _HomePageState extends State<HomePage> {
     _batteryPoll?.cancel();
     await _bose.invokeMethod('disconnect');
     if (mounted) setState(() => _conn = null);
+    // Appen kan inte koppla ner A2DP (Android tillåter det inte); bara kontrollkanalen stängs.
+    _addLog('Control channel closed. Audio is not affected – stop it in Bluetooth settings.');
   }
 
   Future<void> _pollBattery() async {
@@ -632,7 +634,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 if (c.bose)
                   IconButton(
-                    tooltip: 'Disconnect',
+                    tooltip: 'Close control channel (audio keeps playing)',
                     icon: const Icon(Icons.link_off_rounded, color: _muted),
                     onPressed: _busy != null ? null : _disconnect,
                   ),
