@@ -100,6 +100,7 @@ class _HomePageState extends State<HomePage> {
   String? _busy; // 'connect' | 'party' | 'unlink' | 'send'
   bool _showDetails = false;
   Timer? _batteryPoll;
+  int _autoReconnects = 0; // automatiska återanslutningar i rad (nollas när användaren trycker CONNECT)
 
   // Självuppdatering (lib/updater.dart). Kollar BARA när man trycker CHECK FOR UPDATES,
   // som MK2:s SYNC NOW (Niklas 2026-11-26) — inga automatiska nätanrop.
@@ -260,8 +261,26 @@ class _HomePageState extends State<HomePage> {
 
   void _onDisconnected() {
     _batteryPoll?.cancel();
+    final address = _conn?.address;
     if (mounted) setState(() => _conn = null);
     _addLog('Disconnected from the speaker.');
+    // Högtalaren kan kasta ut kontrollkanalen (fälttest 2026-11-27: "Broken pipe" efter misslyckad party).
+    // Anslut igen automatiskt, högst två gånger i rad tills användaren själv trycker CONNECT.
+    if (address == null || _autoReconnects >= 2) return;
+    _autoReconnects++;
+    _addLog('Reconnecting in 3 s (attempt $_autoReconnects of 2) …');
+    _reconnectLater(address, 0);
+  }
+
+  void _reconnectLater(String address, int tries) {
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted || _selected != address || _conn != null) return;
+      if (_busy != null) {
+        if (tries < 10) _reconnectLater(address, tries + 1);
+        return;
+      }
+      _connect(auto: true);
+    });
   }
 
   Connection _parseConnection(String address, Map raw) {
@@ -290,9 +309,10 @@ class _HomePageState extends State<HomePage> {
             : (c.partners.isEmpty ? null : c.partners.first.address);
   }
 
-  Future<void> _connect() async {
+  Future<void> _connect({bool auto = false}) async {
     final address = _selected;
     if (address == null || _busy != null) return;
+    if (!auto) _autoReconnects = 0;
     await _bose.invokeMethod('saveSettings', {'primary': address});
     _batteryPoll?.cancel();
     setState(() {

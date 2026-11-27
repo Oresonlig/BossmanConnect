@@ -344,7 +344,28 @@ class MainActivity : FlutterActivity() {
         val phone = s.phone()?.also { prefs.edit().putString("phone", it.toAddress()).apply() }
             ?: parseAddress(prefs.getString("phone", null))?.also { log("Speaker is busy – using the saved phone address") }
             ?: return false.also { log("Speaker is busy and the phone address isn't known yet – try again in a minute.") }
+        makeRoom(s, partner, phone)
         return s.party(partner, phone)
+    }
+
+    /**
+     * Högtalaren tar bara två källor åt gången (hypotes). Fälttest 2026-11-27: med en annan telefon ansluten
+     * till Ninja kom partnern aldrig och Ninja kastade ut kontrollkanalen. Koppla därför bort andra enheter först.
+     */
+    private fun makeRoom(s: BoseSession, partner: ByteArray, phone: ByteArray) {
+        val paired = try {
+            s.paired()
+        } catch (e: NoAnswer) {
+            log("Couldn't check for other connected devices – linking anyway.")
+            return
+        }
+        val others = paired.filter {
+            it.connected && !it.address.contentEquals(phone) && !it.address.contentEquals(partner)
+        }
+        for (d in others) {
+            log("${d.name} is also connected to the speaker – disconnecting it to make room for the partner …")
+            if (!s.disconnectDevice(d.address)) log("Couldn't disconnect ${d.name} – linking anyway.")
+        }
     }
 
     private fun unlink(s: BoseSession, partnerAddress: String?): Boolean {

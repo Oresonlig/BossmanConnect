@@ -31,7 +31,8 @@ internal fun parseAddress(s: String?): ByteArray? {
  *   04 04  parade enheter      → 04 04 03 <n> <bitmask anslutna> <adr>…
  *   04 05  info om en enhet    → 04 05 03 <n> <adr> <3 byte> <namn>
  *   04 01  party link          → 04 01 05 0D 90 <partner> <telefon>; klar när 04 01 06 07 <partner> 01 kommer
- *   04 02  unlink              → 04 02 05 06 <partner>
+ *   04 02  unlink/koppla bort  → 04 02 05 06 <adr>   (partner eller annan ansluten enhet)
+ *   05 06  låtinfo             → 05 06 03 <n> <00 titel | 01 artist | 02 album?> <text>
  */
 object BoseProtocol {
     val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
@@ -204,6 +205,23 @@ class BoseSession internal constructor(
         if (res == null) { log("No answer to the unlink command."); return false }
         if (res.op == BoseProtocol.OP_ERROR) { log("Speaker refused the unlink command."); return false }
         reader.await(1500) { false }
+        return true
+    }
+
+    /**
+     * Kopplar bort en annan enhet (t.ex. en telefon) från högtalaren. Samma kommando som unlink (04 02).
+     * Fälttest 2026-11-27: Ninja bekräftade bortkopplingen av en telefon med 04 02 06 <adr> 3 s efter RESULT.
+     */
+    fun disconnectDevice(address: ByteArray): Boolean {
+        send(0x04, 0x02, BoseProtocol.OP_START, 0x06, *address.ints())
+        val res = reader.await(8000) { it.isReply(0x04, 0x02) }
+        if (res == null) { log("No answer to the disconnect command."); return false }
+        if (res.op == BoseProtocol.OP_ERROR) { log("Speaker refused the disconnect command."); return false }
+        reader.await(5000) {
+            it.block == 0x04 && it.func == 0x02 && it.op == BoseProtocol.OP_PROCESSING && it.payload.size >= 6 &&
+                it.payload.copyOfRange(0, 6).contentEquals(address)
+        }
+        reader.await(1000) { false }
         return true
     }
 
