@@ -283,6 +283,7 @@ class MainActivity : FlutterActivity() {
                 session = s
                 sessionAddress = address
                 try {
+                    clearOnConnect(s)
                     statusOf(s)
                 } catch (e: NoAnswer) {
                     log(e.message ?: "no answer")
@@ -344,28 +345,63 @@ class MainActivity : FlutterActivity() {
         val phone = s.phone()?.also { prefs.edit().putString("phone", it.toAddress()).apply() }
             ?: parseAddress(prefs.getString("phone", null))?.also { log("Speaker is busy – using the saved phone address") }
             ?: return false.also { log("Speaker is busy and the phone address isn't known yet – try again in a minute.") }
-        makeRoom(s, partner, phone)
+        val paired = makeRoom(s, "the speaker", listOf(phone, partner))
+        val partnerLinked = paired?.any { it.connected && it.address.contentEquals(partner) } == true
+        if (!partnerLinked) clearPartner(partner, phone)
         return s.party(partner, phone)
     }
 
     /**
-     * Högtalaren tar bara två källor åt gången (hypotes). Fälttest 2026-11-27: med en annan telefon ansluten
-     * till Ninja kom partnern aldrig och Ninja kastade ut kontrollkanalen. Koppla därför bort andra enheter först.
+     * Niklas regel 2026-11-27: Bossmans högtalare kastar alltid ut andra anslutningar.
+     * Fälttest samma dag: med en annan telefon ansluten till Ninja kom partnern aldrig och Ninja kastade ut
+     * kontrollkanalen. Kopplar bort allt anslutet utom [keep]. Returnerar listan (null om högtalaren är upptagen).
      */
-    private fun makeRoom(s: BoseSession, partner: ByteArray, phone: ByteArray) {
+    private fun makeRoom(s: BoseSession, speaker: String, keep: List<ByteArray>): List<PairedDevice>? {
         val paired = try {
             s.paired()
         } catch (e: NoAnswer) {
-            log("Couldn't check for other connected devices – linking anyway.")
-            return
+            log("Couldn't check for other devices on $speaker – continuing.")
+            return null
         }
-        val others = paired.filter {
-            it.connected && !it.address.contentEquals(phone) && !it.address.contentEquals(partner)
+        for (d in paired.filter { p -> p.connected && keep.none { it.contentEquals(p.address) } }) {
+            log("${d.name} is connected to $speaker – disconnecting it …")
+            if (!s.disconnectDevice(d.address)) log("Couldn't disconnect ${d.name} – continuing.")
         }
-        for (d in others) {
-            log("${d.name} is also connected to the speaker – disconnecting it to make room for the partner …")
-            if (!s.disconnectDevice(d.address)) log("Couldn't disconnect ${d.name} – linking anyway.")
+        return paired
+    }
+
+    /**
+     * Före party: en kort egen kanal till partnern som kopplar bort andra telefoner där (t.ex. någon som
+     * spelar direkt på Lantern), stängs sedan. Bara när partnern INTE redan är länkad — en andra kanal
+     * under pågående party kan störa länken. Når vi inte partnern länkar vi ändå.
+     */
+    /**
+     * Vid CONNECT: koppla bort andra enheter från huvudhögtalaren. Behåll den här telefonen och den sparade
+     * partnern (en pågående party ska inte brytas). Okänd telefon eller partner → rör ingenting.
+     */
+    private fun clearOnConnect(s: BoseSession) {
+        val phone = s.phone()?.also { prefs.edit().putString("phone", it.toAddress()).apply() }
+            ?: parseAddress(prefs.getString("phone", null))
+        val partner = parseAddress(prefs.getString("partner", null))
+        if (phone == null || partner == null) return
+        makeRoom(s, "the speaker", listOf(phone, partner))
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun clearPartner(partner: ByteArray, phone: ByteArray) {
+        val primary = parseAddress(sessionAddress) ?: return
+        val device = (try { adapter()?.getRemoteDevice(partner.toAddress()) } catch (_: Exception) { null }) ?: return
+        log("Checking the partner speaker for other connections …")
+        val p = BoseSession.open(device, ::log)
+        if (p == null) { log("Couldn't reach the partner's control channel – linking anyway."); return }
+        try {
+            makeRoom(p, "the partner", listOf(primary, phone))
+        } catch (e: Exception) {
+            log("Partner check stopped: ${e.message ?: e.javaClass.simpleName} – linking anyway.")
+        } finally {
+            p.close()
         }
+        Thread.sleep(1000)
     }
 
     private fun unlink(s: BoseSession, partnerAddress: String?): Boolean {
